@@ -17,6 +17,7 @@ public class PriceService {
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    // Global variables
     @Value("${trading.bot.symbol:BTC}")
     private String symbol;
     
@@ -27,6 +28,7 @@ public class PriceService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    // Fetch real-time BTC price data using Coinbase's API
     public BigDecimal fetchCurrentPrice() {
         BigDecimal curPrice = null;
 
@@ -43,12 +45,14 @@ public class PriceService {
         return curPrice;
     }
 
+    // Calculate the moving average
     public BigDecimal calculateMA(int period, String mode) {
         String sql = "SELECT AVG(price) FROM (SELECT price FROM price_history WHERE symbol = ? AND mode = ? ORDER BY timestamp DESC LIMIT ?) AS recent_prices";
         
         return jdbcTemplate.queryForObject(sql, BigDecimal.class, symbol, mode, period);
     }
 
+    // Insert into the database a snapshot of the asset's price during a moment in time
     public void savePriceHistory(String symbol, BigDecimal price, String mode, Timestamp timestamp) {
         try {
             jdbcTemplate.update(
@@ -61,6 +65,7 @@ public class PriceService {
         }
     }
 
+    // Delete all of the asset's price history
     public void resetPriceHistory(String symbol) {
         jdbcTemplate.update(
             "DELETE FROM price_history WHERE symbol = ?",
@@ -68,6 +73,7 @@ public class PriceService {
         );
     }
 
+    // Retrieve the asset's price history according to the bot's mode
     public List<Map<String, Object>> getPriceHistory(String mode) {
         return jdbcTemplate.queryForList(
             "SELECT * FROM price_history WHERE symbol = ? AND mode = ? ORDER BY timestamp DESC LIMIT 200",

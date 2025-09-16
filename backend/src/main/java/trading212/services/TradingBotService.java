@@ -4,7 +4,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
@@ -17,14 +16,17 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class TradingBotService {
-
+    // Dependency injection; use other services for reading/writing data
     private final PortfolioService portfolioService;
     private final PriceService priceService;
     private final JdbcTemplate jdbcTemplate;
     private final TaskScheduler taskScheduler;
 
+    // Schedulers for concurrent trades
     protected ScheduledFuture<?> tradingTask;
     protected ScheduledFuture<?> trainingTask;
+
+    // Atomic variables to check bot's state
     protected final AtomicBoolean isRunning = new AtomicBoolean(false);
     protected final AtomicReference<String> currentMode = new AtomicReference<>("TRAINING");
 
@@ -33,6 +35,7 @@ public class TradingBotService {
     private LocalDateTime lastTimestamp = null;
     private int lastIndex = 0;
 
+    // Global variables subject to change
     @Value("${trading.bot.symbol:BTC}")
     protected String symbol;
 
@@ -53,7 +56,7 @@ public class TradingBotService {
         this.taskScheduler = taskScheduler;
     }
 
-    /** Start bot in the selected mode */
+    // Start bot in the selected mode
     public void startBot(String mode) {
         currentMode.set(mode);
         isRunning.set(true);
@@ -69,7 +72,7 @@ public class TradingBotService {
         }
     }
 
-    /** Stop the bot */
+    // Stop the bot
     public void stopBot() {
         isRunning.set(false);
         stopTradingTask();
@@ -77,7 +80,7 @@ public class TradingBotService {
         updateBotStatus(false, currentMode.get());
     }
 
-    /** Reset bot and portfolio */
+    // Reset bot and portfolio
     public void resetBot() {
         stopBot();
         portfolioService.resetPortfolio();
@@ -87,52 +90,55 @@ public class TradingBotService {
         lastIndex = 0;
     }
 
-    /** Run trading mode using a scheduled task */
+    // Run trading mode using a scheduled task
     public void runTradingMode() {
         stopTradingTask();
         tradingTask = taskScheduler.scheduleWithFixedDelay(this::runTradingStep, Duration.ofSeconds(7));
     }
 
+    // Stop scheduler for TRAIDING mode
     private void stopTradingTask() {
         if (tradingTask != null && !tradingTask.isCancelled()) {
             tradingTask.cancel(true);
         }
     }
 
+    // Stop scheduler for TRAINING mode
     private void stopTrainingTask() {
         if (trainingTask != null && !trainingTask.isCancelled()) {
             trainingTask.cancel(true);
         }
     }
 
-    /** Execute one step of trading */
+    // Execute one step of trading
     protected void runTradingStep() {
-        if (!isRunning.get() || "TRAINING".equals(currentMode.get())) return;
+        if (!isRunning.get() || !"TRADING".equals(currentMode.get())) return;
 
         try {
-            BigDecimal currentPrice = priceService.fetchCurrentPrice();
+            BigDecimal currentPrice = priceService.fetchCurrentPrice(); // get real prices
             if (currentPrice != null) {
                 Timestamp now = new Timestamp(System.currentTimeMillis());
-                priceService.savePriceHistory(symbol, currentPrice, "TRADING", now);
-                evaluateAndTrade(currentPrice, "TRADING", LocalDateTime.now());
+                priceService.savePriceHistory(symbol, currentPrice, "TRADING", now); // save them
+                evaluateAndTrade(currentPrice, "TRADING", LocalDateTime.now()); // decide if tradable
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    /** Execute one step of training */
+    // Execute one step of training
     private void runTrainingStep() {
         if (!isRunning.get() || !"TRAINING".equals(currentMode.get())) return;
 
-        // do one iteration per step
+        // Do one iteration per step
         int i = lastIndex;
         BigDecimal price = lastPrice != null ? lastPrice : new BigDecimal("50000");
         LocalDateTime timestamp = lastTimestamp != null ? lastTimestamp : LocalDateTime.now();
 
-        double change = (Math.random() - 0.5) * 1000;
+        double change = (Math.random() - 0.5) * 1000; // random walk
         price = price.add(new BigDecimal(change)).max(new BigDecimal("10000"));
 
+        // Save new random price
         priceService.savePriceHistory(symbol, price, "TRAINING", Timestamp.valueOf(timestamp));
 
         if (i > longMaPeriod) {
@@ -145,6 +151,7 @@ public class TradingBotService {
         lastIndex = i + 1;
     }
 
+    // Decide if the asset should be traded according to the moving averages approach
     protected void evaluateAndTrade(BigDecimal currentPrice, String mode, LocalDateTime timestamp) {
         BigDecimal shortMA = priceService.calculateMA(shortMaPeriod, mode);
         BigDecimal longMA = priceService.calculateMA(longMaPeriod, mode);
@@ -168,6 +175,9 @@ public class TradingBotService {
         }
     }
 
+    // If the bot decides to buy, update the account balance (pay because buying) or insert into
+    // the account balance if there is no account balance. Update the portfolio accordingly afterwards.
+    // If the bot decides to sell, calculate its net gain/loss, update the portfolio and record the trade.
     protected void executeTrade(String tradeType, BigDecimal quantity, BigDecimal price, String mode, LocalDateTime timestamp) {
         BigDecimal totalValue = quantity.multiply(price);
         BigDecimal profitLoss = BigDecimal.ZERO;
