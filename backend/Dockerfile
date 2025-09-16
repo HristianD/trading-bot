@@ -16,4 +16,4 @@ COPY src ./src
 RUN mvn package -DskipTests
 
 # Run the application
-ENTRYPOINT ["java", "-jar", "target/your-backend-app.jar"]
+ENTRYPOINT ["java", "-jar", "target/trading-bot-0.0.1-SNAPSHOT.jar"]
